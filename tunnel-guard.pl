@@ -55,18 +55,17 @@ exit &main();
 sub main {
     my $prev_v4 = &get_cache();
     my $cur_v4 = &get_ipv4(); 
-
+    die "Unable to get current IPv4 address!" unless is_valid_ipv4($cur_v4);
     &set_cache($cur_v4) if defined($cur_v4);
 
-    if ( $cur_v4 ne $prev_v4 ) {
-        my $updated = &set_ipv4($cur_v4);
-        my $rebuilt = &rebuild_tunnel();
+    if ( "${cur_v4}" ne "${prev_v4}" ) {
+        &set_ipv4($cur_v4);
+        &rebuild_tunnel();
     }
 }
 
 sub log_it {
-    my $priority = shift;
-    my $message = shift;
+    my ($priority, $message) = @_;
     openlog("tunnel-guard", "ndelay,pid,perror", "user");
     syslog($priority, '%s', $message);
     closelog();
@@ -74,51 +73,52 @@ sub log_it {
 
 sub set_cache {
     my $v4addr = shift;
-    my $cache_file = shift;
-    open(my $fh, '>', $cache_file) or return 0;
+    open(my $fh, '>', $cached_v4) or return 0;
     print $fh "${v4addr}";
     close $fh;
     return 1;
 }
 
 sub get_cache {
-    open(my $fh, '<', $cached_v4) or return 0;
+    open(my $fh, '<', $cached_v4) or return undef;
     chomp(my $v4addr = <$fh>);
     close $fh;
-    return $v4addr if is_valid_ipv4($v4addr);
-    return undef;
+    return undef unless is_valid_ipv4($v4addr);
+    return $v4addr;
 }
 
 sub rebuild_tunnel {
-    my $down = qx(/sbin/ifdown $iface);
+    qx(/sbin/ifdown $iface);
     sleep 5;
-    my $up = qx(/sbin/ifup $iface);
-    my $status = qx(/etc/init.d/radvd restart);
+    qx(/sbin/ifup $iface);
+    qx(/etc/init.d/radvd restart);
 }
 
 sub set_ipv4 {
     my $v4addr = shift;
+    return undef unless is_valid_ipv4($v4addr);
     $he_url =~ s/USER/$user/;
     $he_url =~ s/PASS/$pass/;
     $he_url =~ s/TUNNEL/$tunnel/;
     $he_url =~ s/IPV4/$v4addr/;
     my $result = get($he_url);
-    return is_success($result);
+    return $result;
 }
 
 sub get_ipv4 {
-    my $try_1 = rand(@urls);
+    my $try_1 = pop(@urls);
     my $v4addr = get($try_1);
-    if (!is_success($v4addr)) {
-        my $try_2 = grep { $_ != $try_1 } @urls;
+    if (!defined($v4addr)) {
+        my $try_2 = pop(@urls);
         $v4addr = get($try_2);
     }
-    return $v4addr if is_success($v4addr) && is_valid_ipv4($v4addr);
-    return undef;
+    return undef unless is_valid_ipv4($v4addr);
+    return $v4addr;
 }
 
 sub is_valid_ipv4 {
     my $v4addr = shift;
+    return 0 unless defined($v4addr);
     if ( $v4addr =~ m/^(\d\d?\d?)\.(\d\d?\d?)\.(\d\d?\d?)\.(\d\d?\d?)$/ ) {
         return 1 if ($1 <= 255 && $2 <= 255 && $3 <= 255 && $4 <= 255);
     }
@@ -140,3 +140,4 @@ tunnel-broker.pl --user <user> --pass <md5pass> --tunnel <tunnel id>
 
 =cut
 #/* vim: set ts=4 sw=4: */#
+
